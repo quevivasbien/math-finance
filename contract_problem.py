@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 
 
 
-def manager_strategy_linear(T, pmt_slope, interest_rate, max_approp=0.1):
+def manager_strategy_linear(pmt_slope, T, interest_rate, max_approp=0.1):
     approp = np.zeros(T+1)
     for t in range(1, T+1):
         if pmt_slope * sum(np.exp(-interest_rate*(s-t)) for s in range(t+1, T+1)) < 1:
@@ -19,9 +19,9 @@ def manager_strategy_linear(T, pmt_slope, interest_rate, max_approp=0.1):
     return approp
 
 
-def manager_utility0_linear(T, mu, y0, pmt_intercept, pmt_slope, interest_rate, approp=None):
+def manager_utility0_linear(pmt_intercept, pmt_slope, T, mu, y0, interest_rate, approp=None):
     if approp is None:
-        approp = manager_strategy_linear(T, pmt_slope, interest_rate)
+        approp = manager_strategy_linear(pmt_slope, T, interest_rate)
     cumulative_approp = np.cumsum(approp)
     # set expected y to y0 with exponential growth at rate mu minus cumulated appropriation
     # TODO: deal better with growth rates for continous compounding
@@ -31,9 +31,9 @@ def manager_utility0_linear(T, mu, y0, pmt_intercept, pmt_slope, interest_rate, 
     return utility
 
 
-def investor_utility0_linear(T, mu, y0, pmt_intercept, pmt_slope, interest_rate, max_approp=0.1):
-    approp = manager_strategy_linear(T, pmt_slope, interest_rate, max_approp)
-    if manager_utility0_linear(T, mu, y0, pmt_intercept, pmt_slope, interest_rate, approp) <= 0: # or some other threshold
+def investor_utility0_linear(pmt_intercept, pmt_slope, T, mu, y0, interest_rate, max_approp=0.1):
+    approp = manager_strategy_linear(pmt_slope, T, interest_rate, max_approp)
+    if manager_utility0_linear(pmt_intercept, pmt_slope, T, mu, y0, interest_rate, approp) <= 0: # or some other threshold
         return -np.inf  # -infinity since cases where manager's utility is non-positive are unacceptable
     # note short and long-term interest rates assumed to be the same here. can change that.
     cumulative_approp = np.cumsum(approp)
@@ -54,7 +54,7 @@ def plot_investor_utility(intcpt_a, intcpt_b, slope_a, slope_b,
     i = np.linspace(intcpt_a, intcpt_b, resolution)
     s = np.linspace(slope_a, slope_b, resolution)
     ii, ss = np.meshgrid(i, s)
-    utility = vect_investor_util(T, mu, y0, ii, ss, interest_rate, max_approp)
+    utility = vect_investor_util(ii, ss, T, mu, y0, interest_rate, max_approp)
     # x axis will be intercept, y axis will be slope
     plt.imshow(np.flip(utility, 0), cmap=plt.cm.Reds, extent=[intcpt_a, intcpt_b, slope_a, slope_b])
     plt.colorbar()
@@ -85,41 +85,48 @@ def nd_grid_maximize(f, *ranges, midpoints=10, recursions=2):
 
 def investor_strategy_linear(T, mu, y0, interest_rate, max_approp=0.1, irange=(-1.5, 0.5), srange=(-0.1, 0.2)):
     def objective(intcpt, slope):
-        return vect_investor_util(T, mu, y0, intcpt, slope, interest_rate, max_approp)
+        return vect_investor_util(intcpt, slope, T, mu, y0, interest_rate, max_approp)
     return nd_grid_maximize(objective, irange, srange)
 
 
 
-def manager_strategy_modified(T, beta, gamma, interest_rate, max_approp=0.1):
+def manager_strategy_modified(beta, gamma, T, rho, max_approp=0.1):
     approp = np.zeros(T+1)
     for t in range(1, T+1):
-        if gamma + beta * sum(np.exp(-interest_rate*(s-t)) for s in range(t+1, T+1)) < 1:
+        if gamma + beta * sum(np.exp(-rho*(s-t)) for s in range(t+1, T+1)) < 1:
             approp[t] = max_approp
     return approp
 
 
-def manager_utility0_modified(T, mu, y0, alpha, beta, gamma, interest_rate, approp=None):
+def manager_utility0_modified(alpha, beta, gamma, T, mu, y0, rho, approp=None, get_y_exp=False):
     if approp is None:
-        approp = manager_strategy_modified(T, beta, gamma, interest_rate)
+        approp = manager_strategy_modified(beta, gamma, T, rho)
     cumulative_approp = np.cumsum(approp)
     # set expected y to y0 with exponential growth at rate mu minus cumulated appropriation
     # TODO: deal better with growth rates for continous compounding
     y_exp = np.array([y0 * (1+mu)**t for t in range(T)]) - cumulative_approp[:-1]
-    utility = sum(np.exp(-interest_rate*t) * (alpha + beta*y_exp[t-1] \
+    utility = sum(np.exp(-rho*t) * (alpha + beta*y_exp[t-1] \
                   + gamma*(y0*mu*(1+mu)**(t-1)-approp[t]) + approp[t]) \
                   for t in range(1, T+1))
-    return utility
+    if get_y_exp:
+        return utility, y_exp
+    else:
+        return utility
 
 
-def investor_utility0_modified(T, mu, y0, alpha, beta, gamma, interest_rate, max_approp=0.1):
-    approp = manager_strategy_modified(T, beta, gamma, interest_rate, max_approp)
-    manager_util = manager_utility0_modified(T, mu, y0, alpha, beta, gamma, interest_rate, approp)
+def investor_utility0_modified(alpha, beta, gamma, T, mu, y0, rho, r=None, max_approp=0.1):
+    if r is None:
+        r = rho
+    approp = manager_strategy_modified(beta, gamma, T, rho, max_approp)
+    manager_util, y_exp = manager_utility0_modified(alpha, beta, gamma, T, mu, y0, rho, approp, get_y_exp=True)
     if manager_util <= 0: # or some other threshold
         return -np.inf  # -infinity since cases where manager's utility is non-positive are unacceptable
-    # note short and long-term interest rates assumed to be the same here. can change that.
-    # NOTE! if short and long-term interest rates not the same, this next part needs to be changed
-        # since manager and investor utility don't sum to present value of all y
-    util = sum(np.exp(-interest_rate*t) * (mu*(1+mu)**(t-1) * y0) for t in range(1,T+1)) - manager_util
+    # loss is loss due to payments/appropriation to manager. is the same as manager_util if r == rho
+    loss = sum(np.exp(-r*t) * (alpha + beta*y_exp[t-1] \
+                  + gamma*(y0*mu*(1+mu)**(t-1)-approp[t]) + approp[t]) \
+                  for t in range(1, T+1)) \
+            if r != rho else manager_util
+    util = sum(np.exp(-r*t) * (mu*(1+mu)**(t-1) * y0) for t in range(1,T+1)) - loss
     return util
 
 
@@ -128,7 +135,7 @@ vect_investor_util_mod = np.vectorize(investor_utility0_modified,
 
 
 def plot_investor_utility_mod(arange, brange, grange,
-                              T, mu, y0, interest_rate, max_approp=0.1,
+                              T, mu, y0, rho, r=None, max_approp=0.1,
                               resolution=20, show_max=True):
     '''
     Creates a heatmap of the modified investor's utility function across two variables, with the other held fixed
@@ -156,11 +163,11 @@ def plot_investor_utility_mod(arange, brange, grange,
     y = np.linspace(a2, b2, resolution)
     xx, yy = np.meshgrid(x, y)
     if case == 1:
-        utility = vect_investor_util_mod(T, mu, y0, arange, xx, yy, interest_rate, max_approp)
+        utility = vect_investor_util_mod(arange, xx, yy, T, mu, y0, rho, r, max_approp)
     elif case == 2:
-        utility = vect_investor_util_mod(T, mu, y0, xx, brange, yy, interest_rate, max_approp)
+        utility = vect_investor_util_mod(xx, brange, yy, T, mu, y0, rho, r, max_approp)
     elif case == 3:
-        utility = vect_investor_util_mod(T, mu, y0, xx, yy, grange, interest_rate, max_approp)
+        utility = vect_investor_util_mod(xx, yy, grange, T, mu, y0, rho, r, max_approp)
     plt.imshow(np.flip(utility, 0), cmap=plt.cm.Reds, extent=[a1, b1, a2, b2])
     plt.colorbar()
     plt.xlabel('alpha' if case != 1 else 'beta')
@@ -176,11 +183,12 @@ def plot_investor_utility_mod(arange, brange, grange,
     return utility, (max1, max2)
 
 
-def investor_strategy_modified(T, mu, y0, interest_rate, max_approp=0.1,
+def investor_strategy_modified(T, mu, y0, rho, r=None, max_approp=0.1,
                                arange=(-1.5, 0.5), brange=(-0.1, 0.2), grange=(-1,1)):
     def objective(alpha, beta, gamma):
-        return vect_investor_util_mod(T, mu, y0, alpha, beta, gamma, interest_rate, max_approp)
+        return vect_investor_util_mod(alpha, beta, gamma, T, mu, y0, rho, r, max_approp)
     return nd_grid_maximize(objective, arange, brange, grange)
+
 
 # investor_strategy_modified(100, 0.03, 1, 0.02, 0.5) returns \
     # ((-0.9244928625093914, -0.02922614575507137, -0.10743801652892562), array(4.90107199))
