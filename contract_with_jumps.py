@@ -5,7 +5,7 @@ Created on Thu Mar 12 15:05:10 2020
 
 @author: mckay
 
-works similar to contract_problem.py but treats Yt as a continuous-time process allows for jumps in Yt
+works similar to contract_problem.py but treats Yt as a continuous-time process and allows for jumps in Yt
 """
 
 import numpy as np
@@ -14,13 +14,28 @@ from scipy.stats import poisson, norm
 
 
 class Contract:
+    '''Contains variables and functions for general case of contract problem
     
-    def __init__(self, Y0, mu, T, rho, r=None, lambda_=None, m=None, s2=None, max_approp=0.5, manager_threshold=0):
+    Y0 is the initial value of the firm
+    mu is the growth rate of the firm
+    T is the lenght of the contract
+    rho is the manager's interest rate
+    r is the investor's interest rate (riskless rate, should be less than or equal to rho)
+    theta is the efficiency with which the manager can appropriate firm value
+    lambda_ (optional) is the parameter for the poisson component of jumps in firm value
+    m is the mean of jumps in the firm value
+    s2 is the variance of jumps in the firm value
+    max_approp is the maximum amount that the manager can appropriate in a single period
+    manager_threshold is the minimum expected payoff that a manager will accept in a contract
+    '''
+    
+    def __init__(self, Y0, mu, T, rho, r=None, theta=1, lambda_=None, m=None, s2=None, max_approp=0.5, manager_threshold=0):
         self.Y0 = Y0
         self.mu = mu
         self.T = T
         self.rho = rho
         self.r = r if (r is not None) else rho
+        self.theta = theta
         self.lambda_ = lambda_
         self.m = m
         self.s2 = s2
@@ -37,7 +52,7 @@ class Contract:
         return np.exp(samples).mean()
     
     def estimate_Yt(self, t):
-        '''estimates Yt given information at time 0
+        '''estimates expected value of Yt given information at time 0
         '''
         if self.lambda_ is None:
             return self.Y0 * np.exp(self.mu * t)
@@ -55,11 +70,11 @@ class Contract:
         '''determines the manager's appropriation strategy for a given beta and gamma'''
         approp = np.zeros(self.T+1)
         for t in range(1, self.T+1):
-            if gamma + beta * sum(np.exp(-self.rho*(s-t)) for s in range(t+1, self.T+1)) < 1:
+            if gamma + beta * sum(np.exp(-self.rho*(s-t)) for s in range(t+1, self.T+1)) < self.theta:
                 approp[t] = self.max_approp
         return approp
     
-    def manager_utility0(self, alpha, beta, gamma, approp=None, get_y_exp=False):
+    def manager_utility0(self, alpha, beta, gamma, approp=None):
         '''determines manager's expected utility for a given contract
         '''
         if approp is None:
@@ -69,7 +84,7 @@ class Contract:
         utility = sum(np.exp(-self.rho * t) * (
                     alpha + beta*(Y_exp[t-1] - cumulative_approp[t-1]) \
                     + gamma*(Y_exp[t] - Y_exp[t-1] - approp[t]) \
-                    + approp[t]) for t in range(1, self.T+1)
+                    + self.theta * approp[t]) for t in range(1, self.T+1)
                 )
         return utility
     
@@ -92,7 +107,7 @@ class Contract:
     
     def plot_investor_utility(self, arange, brange, grange, resolution=20, show_max=True):
         '''
-        Creates a heatmap of the modified investor's utility function across two variables, with the other held fixed
+        Creates a heatmap of the investor's utility function across two variables, with the other held fixed
         
         One of arange, brange, grange must be a scalar; the others must be size-2 tuples representing ranges to plot over
         resolution is the the number of points to evaluate -- the result will be a resolution x resolution matrix/heatmap
