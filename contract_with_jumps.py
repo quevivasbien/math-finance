@@ -10,7 +10,6 @@ works similar to contract_problem.py but treats Yt as a continuous-time process 
 
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.stats import poisson, norm
 
 
 class Contract:
@@ -43,27 +42,21 @@ class Contract:
         self.manager_threshold = manager_threshold
         self.Y_exp = None
     
-    def estimate_exp_Jt(self, t, samples=10000):
-        '''Monte Carlo approach to estimate the expected value of exp(J_t)
-        J_t = sum of Nt N(m, s2) random variables, where Nt ~ Poisson(lambda_*t)
-        '''
-        Nts = poisson.rvs(self.lambda_*t, size=samples)
-        samples = norm.rvs(loc=Nts*self.m, scale=np.sqrt(Nts*self.s2))
-        return np.exp(samples).mean()
-    
-    def estimate_Yt(self, t):
-        '''estimates expected value of Yt given information at time 0
+    def expected_Yt(self, t):
+        '''computes expected value of Yt given information at time 0
         '''
         if self.lambda_ is None:
+            # assume no jumps
             return self.Y0 * np.exp(self.mu * t)
         else:
-            return self.Y0 * np.exp(self.mu * t) * self.estimate_exp_Jt(t)
+            # multiply by effect from jumps
+            return self.Y0 * np.exp(self.mu * t + self.lambda_ * t * (np.exp(self.m + self.s2/2) - 1))
     
     def get_Y_exp(self):
         '''determines expectation of Y for t = 0, ..., T, based on info at time 0
         '''
         if self.Y_exp is None:
-            self.Y_exp = np.array([self.estimate_Yt(t) for t in range(self.T+1)])
+            self.Y_exp = np.array([self.expected_Yt(t) for t in range(self.T+1)])
         return self.Y_exp
     
     def manager_strategy(self, beta, gamma):
