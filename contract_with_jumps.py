@@ -119,7 +119,7 @@ class Contract:
             a2, b2 = brange
         else:
             print('one of arange, brange, grange must be scalar; the others must be size-2 tuples')
-            return np.array(), (0, 0)
+            return np.array([]), (0, 0)
         x = np.linspace(a1, b1, resolution)
         y = np.linspace(a2, b2, resolution)
         xx, yy = np.meshgrid(x, y)
