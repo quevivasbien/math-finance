@@ -1,7 +1,4 @@
----
-title: Readme
-author: Mckay Jensen
----
+Github doesn't automatically render LaTex equations in markdown. See [readme.html](https://github.com/quevivasbien/math-finance/edit/master/readme.html) instead.
 
 ## Contract problems
 
