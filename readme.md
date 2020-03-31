@@ -1,4 +1,4 @@
-Github doesn't automatically render LaTex equations in markdown. See [readme.html](https://github.com/quevivasbien/math-finance/edit/master/readme.html) instead.
+Github doesn't automatically render LaTex equations in markdown. See [readme.pdf](https://github.com/quevivasbien/math-finance/edit/master/readme.pdf) instead.
 
 ## Contract problems
 
