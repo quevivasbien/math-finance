@@ -28,8 +28,7 @@ class Contract:
     '''
     
     def __init__(self, Y0=1, mu=0.01, sigma=0.1, T=20, rho=0.03, r=None, theta=1, lambda_=None, m=0, s2=1,
-                 max_approp=0.1, manager_threshold=0,
-                 realizations=None):
+                 max_approp=0.1, manager_threshold=0):
         self.Y0 = Y0
         self.mu = mu
         self.sigma = sigma
@@ -43,7 +42,7 @@ class Contract:
         self.max_approp = max_approp
         self.manager_threshold = manager_threshold
         self.Y_exp = None
-        self.realizations = realizations  # can be provided upon init, or just use load_realizations
+        self.realizations = None
             
     
     def expected_Yt(self, t, t0=0, Yt0=None):
@@ -94,7 +93,8 @@ class Contract:
         
     def estimate_expected_approp(self, beta, gamma, delta, approp=None):
         '''estimates a time series of the expected value of the manager's appropriation at each step
-        works backward on each simulated realization to determine optimal approp for that realization
+        works forward on each simulated realization to determine optimal approp for that realization
+            then computes expected approp by averaging all approp strategies
         '''
         if self.realizations is None:
             self.load_realizations()
@@ -154,8 +154,6 @@ class Contract:
         variables = (arange, brange, grange, drange)
         ranges = tuple(np.where([isinstance(x, (tuple, list)) for x in variables])[0])
         fixed = tuple(np.where([not isinstance(x, (tuple, list)) for x in variables])[0])
-        print(ranges)
-        print(fixed)
         if len(ranges) != 2 or len(fixed) != 2:
             print('two of arange, brange, grange, drange should be ranges, and the other two should be scalars.')
             return np.array([]), (0,0)

@@ -59,32 +59,32 @@ class Contract:
             self.Y_exp = np.array([self.expected_Yt(t) for t in range(self.T+1)])
         return self.Y_exp
     
-    def manager_strategy(self, beta, gamma):
-        '''determines the manager's appropriation strategy for a given beta and gamma'''
+    def manager_strategy(self, beta, delta):
+        '''determines the manager's appropriation strategy for a given beta and delta'''
         approp = np.zeros(self.T+1)
         for t in range(1, self.T+1):
-            if gamma + beta * sum(np.exp(-self.rho*(s-t)) for s in range(t+1, self.T+1)) < self.theta:
+            if delta + beta * sum(np.exp(-self.rho*(s-t)) for s in range(t+1, self.T+1)) < self.theta:
                 approp[t] = self.max_approp
         return approp
     
-    def manager_utility0(self, alpha, beta, gamma, approp=None):
+    def manager_utility0(self, alpha, beta, delta, approp=None):
         '''determines manager's expected utility for a given contract
         '''
         if approp is None:
-            approp = self.manager_strategy(beta, gamma)
+            approp = self.manager_strategy(beta, delta)
         cumulative_approp = np.cumsum(approp)
         Y_exp = self.get_Y_exp()
         utility = sum(np.exp(-self.rho * t) * (
                     alpha + beta*(Y_exp[t-1] - cumulative_approp[t-1]) \
-                    + gamma*(Y_exp[t] - Y_exp[t-1] - approp[t]) \
+                    + delta*(Y_exp[t] - Y_exp[t-1] - approp[t]) \
                     + self.theta * approp[t]) for t in range(1, self.T+1)
                 )
         return utility
     
-    def investor_utility0(self, alpha, beta, gamma):
-        approp = self.manager_strategy(beta, gamma)
+    def investor_utility0(self, alpha, beta, delta):
+        approp = self.manager_strategy(beta, delta)
         cumulative_approp = np.cumsum(approp)
-        manager_util = self.manager_utility0(alpha, beta, gamma, approp)
+        manager_util = self.manager_utility0(alpha, beta, delta, approp)
         if manager_util <= self.manager_threshold: # these cases are unacceptable contracts
             return -np.inf
         Y_exp = self.get_Y_exp()
@@ -92,7 +92,7 @@ class Contract:
         loss = manager_util if self.r == self.rho else \
                 sum(np.exp(-self.r * t) * (
                     alpha + beta*(Y_exp[t-1] - cumulative_approp[t-1]) \
-                    + gamma*(Y_exp[t] - Y_exp[t-1] - approp[t]) \
+                    + delta*(Y_exp[t] - Y_exp[t-1] - approp[t]) \
                     + approp[t]) for t in range(1, self.T+1)
                 )
         investor_util = sum(np.exp(-self.r * t) * (Y_exp[t] - Y_exp[t-1]) for t in range(1, self.T+1)) - loss
@@ -133,12 +133,12 @@ class Contract:
         plt.imshow(np.flip(utility, 0), cmap=plt.cm.Reds, extent=[a1, b1, a2, b2])
         plt.colorbar()
         plt.xlabel('alpha' if case != 1 else 'beta')
-        plt.ylabel('gamma' if case != 3 else 'beta')
+        plt.ylabel('delta' if case != 3 else 'beta')
         max_index = np.unravel_index(utility.argmax(), utility.shape)
         max1, max2 = x[max_index[1]], y[max_index[0]]
         if show_max:
             plt.scatter(max1, max2, marker='x')
-        excluded = 'alpha' if case == 1 else 'beta' if case == 2 else 'gamma'
+        excluded = 'alpha' if case == 1 else 'beta' if case == 2 else 'delta'
         excluded_val = arange if case == 1 else brange if case == 2 else grange
         plt.title(f'{excluded}={excluded_val}, max={utility[max_index]:.2f}')
         plt.show()
