@@ -63,7 +63,7 @@ class Contract:
         '''determines the manager's appropriation strategy for a given beta and delta'''
         approp = np.zeros(self.T+1)
         for t in range(1, self.T+1):
-            if delta + beta * sum(np.exp(-self.rho*(s-t)) for s in range(t+1, self.T+1)) < self.theta:
+            if delta + beta * sum(np.exp(-self.rho*(s-t)) for s in range(t, self.T+1)) < self.theta:
                 approp[t] = self.max_approp
         return approp
     
@@ -75,7 +75,7 @@ class Contract:
         cumulative_approp = np.cumsum(approp)
         Y_exp = self.get_Y_exp()
         utility = sum(np.exp(-self.rho * t) * (
-                    alpha + beta*(Y_exp[t-1] - cumulative_approp[t-1]) \
+                    alpha + beta*(Y_exp[t] - cumulative_approp[t]) \
                     + delta*(Y_exp[t] - Y_exp[t-1] - approp[t]) \
                     + self.theta * approp[t]) for t in range(1, self.T+1)
                 )
@@ -91,34 +91,34 @@ class Contract:
         # loss is loss due to payments/appropriation to manager. is the same as manager_util if r == rho
         loss = manager_util if self.r == self.rho else \
                 sum(np.exp(-self.r * t) * (
-                    alpha + beta*(Y_exp[t-1] - cumulative_approp[t-1]) \
+                    alpha + beta*(Y_exp[t] - cumulative_approp[t]) \
                     + delta*(Y_exp[t] - Y_exp[t-1] - approp[t]) \
                     + approp[t]) for t in range(1, self.T+1)
                 )
         investor_util = sum(np.exp(-self.r * t) * (Y_exp[t] - Y_exp[t-1]) for t in range(1, self.T+1)) - loss
         return investor_util
     
-    def plot_investor_utility(self, arange, brange, grange, resolution=20, show_max=True):
+    def plot_investor_utility(self, arange, brange, drange, resolution=20, show_max=True):
         '''
         Creates a heatmap of the investor's utility function across two variables, with the other held fixed
         
-        One of arange, brange, grange must be a scalar; the others must be size-2 tuples representing ranges to plot over
+        One of arange, brange, drange must be a scalar; the others must be size-2 tuples representing ranges to plot over
         resolution is the the number of points to evaluate -- the result will be a resolution x resolution matrix/heatmap
         '''
         if not isinstance(arange, (tuple, list)):
             case = 1
             a1, b1 = brange
-            a2, b2 = grange
+            a2, b2 = drange
         elif not isinstance(brange, (tuple, list)):
             case = 2
             a1, b1 = arange
-            a2, b2 = grange
-        elif not isinstance(grange, (tuple, list)):
+            a2, b2 = drange
+        elif not isinstance(drange, (tuple, list)):
             case = 3
             a1, b1 = arange
             a2, b2 = brange
         else:
-            print('one of arange, brange, grange must be scalar; the others must be size-2 tuples')
+            print('one of arange, brange, drange must be scalar; the others must be size-2 tuples')
             return np.array([]), (0, 0)
         x = np.linspace(a1, b1, resolution)
         y = np.linspace(a2, b2, resolution)
@@ -129,7 +129,7 @@ class Contract:
         elif case == 2:
             utility = vect_investor_utility0(xx, brange, yy)
         elif case == 3:
-            utility = vect_investor_utility0(xx, yy, grange)
+            utility = vect_investor_utility0(xx, yy, drange)
         plt.imshow(np.flip(utility, 0), cmap=plt.cm.Reds, extent=[a1, b1, a2, b2])
         plt.colorbar()
         plt.xlabel('alpha' if case != 1 else 'beta')
@@ -139,7 +139,7 @@ class Contract:
         if show_max:
             plt.scatter(max1, max2, marker='x')
         excluded = 'alpha' if case == 1 else 'beta' if case == 2 else 'delta'
-        excluded_val = arange if case == 1 else brange if case == 2 else grange
+        excluded_val = arange if case == 1 else brange if case == 2 else drange
         plt.title(f'{excluded}={excluded_val}, max={utility[max_index]:.2f}')
         plt.show()
         return utility, (max1, max2)
