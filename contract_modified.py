@@ -20,13 +20,20 @@ DEFAULT_POLYDEGREE = 3
 
 
 class AppropRule:
+    '''A model meant to approximate the manager's optimal appropriation rule.
+
+    The predict function will construct a matrix of features X based on a vector of reported firm values
+        and a vector of transition ratios, multiply X by the model coefficients,
+        put the output through an inverse logit function, and then scale to the range [0, max_approp].
+    The features in X are polynomial features of degree polydegree.
+    '''
     
     def __init__(self, max_approp, polydegree=DEFAULT_POLYDEGREE):
         self.max_approp = max_approp
         self.polydegree = polydegree
         ncoeffs = (polydegree + 1)*(polydegree + 2) // 2  # ncoeffs grows exponentially with degree
         self.coeffs = np.ones(ncoeffs)
-        self.polyFeatures = PolynomialFeatures()
+        self.polyFeatures = PolynomialFeatures(degree=polydegree)
         self.polyFeatures.fit([[0,0]])  # will be handed two features
     
     def predict(self, yt, rt, coeffs=None):
@@ -52,6 +59,8 @@ class ModifiedContract:
     s2 is the variance of jumps in the firm value
     max_approp is the maximum amount that the manager can appropriate in a single period
     manager_threshold is the minimum expected payoff that a manager will accept in a contract
+    use_shortcut is Boolean, whether to approximate appropriation strategy with "short-sighted" strategy
+        or attempt to find better strategy using fit_approp_rules
     '''
     
     def __init__(self, Y0=1, mu=0.01, sigma=0.1, T=20, rho=0.03, r=None, theta=1, lambda_=None, m=0, s2=1,
@@ -94,14 +103,14 @@ class ModifiedContract:
                 # will sum up "out", the continuation utility for a given approp
                 approp = models[t-1].predict(Yt, ratios[:,t-1], approp_coeffs)
                 out = npaths * (self.theta * approp \
-                                + polynomial.polyval(Yt*ratios[:,t-1] - approp - Yt*self.ratio, coeffs))
+                                + polynomial.polyval(Yt*(ratios[:,t-1] - self.ratio) - approp, coeffs))
                 for s in range(t+1, self.T+1):
                     new_Yt = np.prod(ratios[:,t:(s-1)], axis=1)*Yt
                     approp = models[s-1].predict(new_Yt, ratios[:,s-1])
                     out += discounts[s-t] * (self.theta * approp \
-                            + polynomial.polyval(new_Yt*ratios[:,s-1] - approp - new_Yt*self.ratio, coeffs))
-                # minimize negative sum of squares
-                return - np.sum(out**2)
+                            + polynomial.polyval(new_Yt*(ratios[:,s-1] - self.ratio) - approp, coeffs))
+                # minimize sum of utilities
+                return - np.sum(out)
             models[t-1].coeffs = minimize(objective, x0=models[t-1].coeffs).x
         print(f'models fit in {time()-time0:.2f}')
         return models
@@ -124,7 +133,7 @@ class ModifiedContract:
     
     
     def simulate_runs_shortcut(self, coeffs, nruns=100):
-        '''Simulates runs where manager is "short-sided" (i.e. maximizes current payoff at every step)
+        '''Simulates runs where manager is "short-sighted" (i.e. maximizes current payoff at every step)
         '''
         runs = np.ones((nruns, self.T+1)) * self.Y0
         approps = np.zeros((nruns, self.T+1))
@@ -174,8 +183,11 @@ class ModifiedContract:
     
     def find_best_contract(self, bounds, popsize=10, maxiter=10):
         '''Uses differential evolution algorithm to attempt to find best contract for investor.
+        
         bounds should be a list of 2-tuples, with length equal to degree of [polynomial] payment function
         the maximum number of iterations required is len(bounds)*popsize*maxiter
+
+        Be aware that this can a take a long time to compute (on the order of multiple hours if not using shortcut)
         '''
         def objective(coeffs):
             return -self.calculate_investor_utility(coeffs)
