@@ -127,7 +127,7 @@ class ModifiedContract:
         ratios = np.exp(self.mu - self.sigma**2 / 2 \
                              + np.random.normal(loc=Nts*self.m, scale=np.sqrt(self.sigma**2 + Nts*self.s2)))
         for t in range(1, self.T+1):
-            approps[:, t] = models[t-1].predict(runs[:,t-1], ratios[:,t-1])*self.max_approp
+            approps[:, t] = models[t-1].predict(runs[:,t-1], ratios[:,t-1])
             runs[:, t] = runs[:,t-1]*ratios[:,t-1] - approps[:, t]
         return runs, approps
     
