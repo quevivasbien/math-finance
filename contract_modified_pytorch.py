@@ -4,16 +4,26 @@
 Created on Sat May  2 11:55:25 2020
 
 @author: mckay
+
+Code for the modified contract using PyTorch for quicker optimization and easier setup of AppropRule models
+Ideas for expansion:
+    Create visualizations of payoffs
+    Implement best contract solver
+    Try using more simulated runs
 """
 
 import torch
 import torch.nn as nn
 import torch.distributions as dist
+import numpy as np
 import matplotlib.pyplot as plt
 
 from time import time
+from itertools import product
+from scipy.optimize import fminbound
 
 DEFAULT_POLYDEGREE = 3
+PLOT_LOSSES = False
 
 
 def poly_eval(x, coeffs):
@@ -76,6 +86,28 @@ class AppropRule(nn.Module):
             return self.forward(yt, rt)
 
 
+class NeuralAppropRule(nn.Module):
+    """Version of AppropRule that uses neural network instead of basic linear rule"""
+    def __init__(self, max_approp, input_size=2, hidden_size=10, polydegree=DEFAULT_POLYDEGREE):
+        super().__init__()
+        self.max_approp = max_approp
+        self.polyFeatures = PolyFeatures(input_size, degree=polydegree)
+        self.linear1 = nn.Linear(self.polyFeatures.output_size, hidden_size)
+        self.linear2 = nn.Linear(hidden_size, 1)
+        self.relu = nn.ReLU()
+        self.expit = nn.Sigmoid()
+        
+    def forward(self, yt, rt):
+        XP = self.polyFeatures.transform(torch.stack((yt, yt*rt), dim=1))
+        h = self.relu(self.linear1(XP))
+        prediction = self.max_approp * self.expit(self.linear2(h))
+        return prediction
+    
+    def predict(self, yt, rt):
+        with torch.no_grad():
+            return self.forward(yt, rt)
+
+
 class ModifiedContract:
     """Contains variables and functions for modified version of contract problem
     
@@ -95,7 +127,7 @@ class ModifiedContract:
     """
     
     def __init__(self, Y0=1, mu=0.01, sigma=0.1, T=20, rho=0.03, r=None, theta=1, lambda_=None, m=0, s2=1,
-                 max_approp=0.1, manager_threshold=0, use_shortcut=False):
+                 max_approp=0.05, manager_threshold=0, use_shortcut=False):
         self.Y0 = torch.tensor(Y0)
         self.mu = torch.tensor(mu)
         self.sigma = torch.tensor(sigma)
@@ -113,7 +145,7 @@ class ModifiedContract:
         self.ratio = torch.exp(self.mu + self.lambda_*(torch.exp(self.m + self.s2/2) - 1)) \
                         if self.lambda_ else torch.exp(self.mu)
                             
-    def fit_approp_rules(self, coeffs, npaths=100, lr=0.02, epochs_per_step=30):
+    def fit_approp_rules(self, coeffs, npaths=100, lr=0.02, epochs_per_step=50, Model=AppropRule):
         """Estimates optimal appropriation rules to maximize the manager's utility.
         """
         print(f'fitting approp rules with {coeffs}...')
@@ -126,7 +158,7 @@ class ModifiedContract:
         discounts = torch.exp(-self.rho * torch.arange(self.T+1))
         # calculate endpoints
         Yt = self.Y0 * ratios.prod(axis=1)
-        models = [AppropRule(self.max_approp) for _ in range(self.T)]
+        models = [Model(self.max_approp) for _ in range(self.T)]
         for t in reversed(range(1, self.T+1)):
             def loss_fn(approp):
                 utils = npaths * (self.theta * approp \
@@ -142,13 +174,18 @@ class ModifiedContract:
             for i in range(epochs_per_step):
                 approp = models[t-1].forward(Yt, ratios[:, t-1])
                 loss = loss_fn(approp)
-                losses.append(loss.detach().numpy())
+                losses.append(loss.item())
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
-            plt.plot(losses)
-        plt.show()
-        print(f'models fit in {time()-time0:.2f}')
+                # exit prematurely if no progress is being made
+                if i > 3 and (losses[-1] - losses[-4]) / abs(losses[-4]) > -0.001:
+                    break
+            if PLOT_LOSSES:
+                plt.plot(losses)
+        if PLOT_LOSSES:
+            plt.show()
+        print(f'models fit in {time()-time0:.2f} s')
         self.models = models
         return models
     
@@ -167,10 +204,37 @@ class ModifiedContract:
             runs[:, t] = runs[:, t-1] * ratios[:, t-1] - approps[:, t]
         return runs, approps
     
-    def calculate_utilities(self, coeffs):
+    def simulate_runs_shortcut(self, coeffs, nruns=100):
+        """Simulates runs where manager is "short-sighted" (i.e. maximizes current payoff at every step)
+        This method does not use PyTorch for optimization and is not actually much faster than self.simulate_runs()
+            -- it's included here only for comparison purposes.
+        """
+        runs = np.ones((nruns, self.T+1)) * self.Y0.numpy()
+        approps = np.zeros((nruns, self.T+1))
+        # create numpy versions of all params
+        mu = self.mu.numpy()
+        sigma = self.sigma.numpy()
+        m = self.m.numpy()
+        s2 = self.s2.numpy()
+        theta = self.theta.numpy()
+        ratio = self.ratio.numpy()
+        max_approp = self.max_approp.numpy()
+        Nts = np.random.poisson(self.lambda_.numpy(), size=(nruns, self.T)) \
+                if self.lambda_ else np.zeros((nruns, self.T))
+        ratios = np.exp(mu - sigma**2 / 2 + np.random.normal(loc=Nts*m, scale=np.sqrt(sigma**2 + Nts*s2)))
+        def objective(approp, yt, rt):
+            return - theta * approp - np.polynomial.polynomial.polyval(yt*rt - approp - yt*ratio, coeffs)
+        for t in range(1, self.T+1):
+            for n in range(nruns):
+                approps[n,t] = fminbound(objective, 0, max_approp, args=(runs[n,t-1], ratios[n,t-1]))
+            runs[:,t] = runs[:,t-1]*ratios[:,t-1] - approps[:,t]
+        return torch.from_numpy(runs), torch.from_numpy(approps)
+    
+    def calculate_utilities(self, coeffs, nruns=100, models=None):
         """Calculates utilities of simulated runs under optimal appropriation assumption
         """
-        runs, approps = self.simulate_runs(coeffs)
+        runs, approps = self.simulate_runs(coeffs, nruns, models) \
+                            if not self.use_shortcut else self.simulate_runs_shortcut(coeffs, nruns)
         one_step_expectations = runs[:, :-1] * self.ratio
         payments = poly_eval(runs[:, 1:] - one_step_expectations, coeffs)
         manager_discounts = torch.exp(-self.rho * torch.arange(1, self.T+1))
@@ -187,9 +251,21 @@ class ModifiedContract:
     
     
     def calculate_investor_utility(self, coeffs):
-        '''Determines investor utility under payment scheme with coeffs.
+        """Determines investor utility under payment scheme with coeffs.
         Will return -inf if scheme does not meet manager threshold, since such a contract is unacceptable.
-        '''
+        """
         manager_util, investor_util = self.calculate_expected_utilities(coeffs)
         return investor_util if manager_util >= self.manager_threshold else torch.tensor(float('-inf'))
+    
+    def create_util_maps(self, *coeff_vecs):
+        """Iterates through the cartesian product of vectors of payment coefficients (coeff_vecs)
+        and calculates expected manager & investor utility for each
+        """
+        shapes = tuple(len(c) for c in coeff_vecs)
+        total_len = np.prod(shapes)
+        manager_util = np.empty(total_len)
+        investor_util = np.empty(total_len)
+        for i, coeffs in enumerate(product(*coeff_vecs)):
+            manager_util[i], investor_util[i] = self.calculate_expected_utilities(coeffs)
+        return manager_util.reshape(shapes), investor_util.reshape(shapes)
     
